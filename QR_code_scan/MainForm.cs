@@ -1,10 +1,11 @@
-﻿using System;
+﻿using AForge.Video;
+using AForge.Video.DirectShow;
+using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Threading;
+using System.Threading.Tasks;
 using System.Windows.Forms;
-using AForge.Video;
-using AForge.Video.DirectShow;
 using ZXing;
 
 namespace QR_code_scan
@@ -18,7 +19,7 @@ namespace QR_code_scan
         public bool StartClickState { get; set; }
 
         public string TempQrDecode { get; set; }
-
+        private List<string> scans = new List<string>();
 
         public MainForm()
         {
@@ -45,8 +46,21 @@ namespace QR_code_scan
             TempQrDecode = string.Empty;
         }
 
+        private bool isExit = false;
+        private bool isCan;
         private void StartStop_button_Click(object sender, EventArgs e)
         {
+            scans.Clear(); //очищаем коллекцию сканов
+
+            //запускаем поток установки флага сканирования
+            Task.Factory.StartNew(() =>
+            {
+                while (!isExit)
+                {
+                    isCan = true;
+                    Thread.Sleep(1000);
+                }
+            });
 
             if (!StartClickState)
             {
@@ -58,8 +72,10 @@ namespace QR_code_scan
                 StartStop_button.Text = "Stop scan";
                 StartClickState = true;
             }
-            else 
+            else
             {
+                //флаг закрытия потока
+                isExit = true;
                 if (videoSource != null)
                 {
                     // stop camera stream
@@ -81,21 +97,32 @@ namespace QR_code_scan
             Bitmap bitmap = (Bitmap)eventArgs.Frame.Clone();
             Stream_pictureBox.Image = bitmap;
 
+            //если сканирование производилось уже в течении делея то выходим
+            if (!isCan) return;
+
             // send image from camera in ZXing class, and decode them
             Result result = reader.Decode((Bitmap)eventArgs.Frame.Clone());
-            if (result != null && result.Text != TempQrDecode)
+
+            //если в коллекции сканов уже есть такой текст, то выходим
+            if (result != null && !scans.Contains(result.Text))
             {
+                //установка флага что уже отсканировано
+                isCan = false;
+                //добавление уникального значения
+                scans.Add(result.Text);
                 Invoke((MethodInvoker)delegate
-                      {
-                          QrDecode_textBox.AppendText("\r\n" + result.Text);
-                      });
+                {
+                    QrDecode_textBox.AppendText("\r\n" + result.Text);
+                });
                 TempQrDecode = result.Text;
             }
         }
 
         private void MainForm_FormClosing(object sender, FormClosingEventArgs e)
         {
-            if(videoSource != null)
+            //флаг остановки потока при закрытии формы
+            isExit = true;
+            if (videoSource != null)
             {
                 videoSource.SignalToStop();
                 videoSource.WaitForStop();
